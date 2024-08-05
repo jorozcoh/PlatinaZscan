@@ -7,14 +7,6 @@ int stopSensor1 = 13; // final de carrera 1
 int stopSensor2 = 32; // final de carrera 2
 int LED = 2; // LED interno para las interrupciones
 
-// Encoder pins
-#define encoderPinA 25
-#define encoderPinB 26
-
-// Encoder properties
-const int pulsesPerRevolution = 20000;
-const int quadratureSteps = 4; // Número de pasos por ciclo (A y B subiendo y bajando)
-
 // Variables
 volatile bool CrashSensor1 = false; // bandera para final de carrera 1
 volatile bool CrashSensor2 = false; // bandera para final de carrera 2
@@ -24,63 +16,47 @@ unsigned long lastDebounceTime1 = 0;
 unsigned long lastDebounceTime2 = 0;
 const unsigned long debounceDelay = 50; // tiempo de debounce en milisegundos
 bool homing = false; // bandera para indicar si el motor está en modo Home
-
-// Encoder variables
-volatile int counter = 0;
-volatile int lastEncoderState = 0;
-hw_timer_t *timer = NULL;
-const int timerInterval = 200;  // Intervalo del timer en microsegundos (1 ms)
+bool moveComplete = false; // bandera para indicar si el movimiento ha sido completado
 
 // Serial communication variables
 Separador s; // estructura para separar del serial
 String elemento1; // instrucción de motor/posición
-int motion; // posición a la que moverse
+float motion_mm; // posición a la que moverse en mm
+String receivedData = ""; // buffer to store incoming serial data
 
 // Motor setup
 AccelStepper stepper(AccelStepper::DRIVER, 33, 14); // pin 33 pulso menos y 14 dir menos
 
 // Function declarations
-void IRAM_ATTR buttonInterrupt1(); // Funcion interrupcion final de carrera 1 (el del encoder)
-void IRAM_ATTR buttonInterrupt2();// Funcion interrupcion final de carrera 2
-void serialEvent(); // funcion para separar los comandos del serial cuando se mandan los :
+void IRAM_ATTR buttonInterrupt1();
+void IRAM_ATTR buttonInterrupt2();
+void serialEvent();
 void executeCommand(String cmd);
-void stopMotorAndMove(int steps, bool resetPosition); // funcion para detener el motor en los finales de carrera y que haga el rebote
+void stopMotorAndMove(int steps, bool resetPosition);
 void handleCrashSensors();
-void IRAM_ATTR onTimer(); //interrupcion timer encoder
-void handleEncoderState(); // funcion de conteo de pulsos encoder
+void checkMovementComplete();
 
 void setup() {
   // Pin mode setup
   pinMode(stopSensor1, INPUT_PULLUP);
   pinMode(stopSensor2, INPUT_PULLUP);
   pinMode(LED, OUTPUT);
-  pinMode(encoderPinA, INPUT);
-  pinMode(encoderPinB, INPUT);
 
   // Interrupts setup
   attachInterrupt(digitalPinToInterrupt(stopSensor1), buttonInterrupt1, CHANGE);
   attachInterrupt(digitalPinToInterrupt(stopSensor2), buttonInterrupt2, CHANGE);
 
-  // Encoder interrupt setup
-  attachInterrupt(digitalPinToInterrupt(encoderPinA), [] {
-    timerAlarmEnable(timer);
-  }, CHANGE);
-
-  // Timer setup
-  timer = timerBegin(1, 80, true);
-  timerAttachInterrupt(timer, &onTimer, true);
-  timerAlarmWrite(timer, timerInterval, true);
-
   // Serial initialization
-  Serial.begin(921600);
+  Serial.begin(115200);
 
   // Motor initial setup
-  stepper.setMaxSpeed(8000); //maxima aceleracion definida
+  stepper.setMaxSpeed(8000);
   stepper.setAcceleration(70); // ideal 50
 }
 
-void loop() { // en el loop se revisan constantemente los finales de carrera, se deserializan comandos y se usa el homing para mover el motor a posicion o a velocidad especifica
+void loop() {
   handleCrashSensors();
+  checkMovementComplete();
 
   // Check serial for commands
   if (Serial.available()) {
@@ -95,12 +71,14 @@ void loop() { // en el loop se revisan constantemente los finales de carrera, se
     stepper.run();
   }
 
-  // Print encoder counter value
-  static int lastCounter = 0;
-  if (counter != lastCounter) {
-    Serial.print("Counter: ");
-    Serial.println(counter);
-    lastCounter = counter;
+  // Print motor position while moving
+  static long lastPosition = -1;
+  long currentPosition = stepper.currentPosition();
+  if (currentPosition != lastPosition) {
+    float position_mm = (currentPosition - 180.15) / 398.77; // Convert steps to mm
+    Serial.print("Position: ");
+    Serial.println(position_mm);
+    lastPosition = currentPosition;
   }
 }
 
@@ -114,7 +92,7 @@ void handleCrashSensors() {
     if (digitalRead(stopSensor1) == LOW) {
       digitalWrite(LED, HIGH);
       stopMotorAndMove(3000, true);
-      Serial.println("Crash Sensor 1 Triggered");
+      
     } else {
       digitalWrite(LED, LOW);
     }
@@ -127,7 +105,6 @@ void handleCrashSensors() {
     if (digitalRead(stopSensor2) == LOW) {
       digitalWrite(LED, HIGH);
       stopMotorAndMove(-3000, false);
-      Serial.println("Crash Sensor 2 Triggered");
     } else {
       digitalWrite(LED, LOW);
     }
@@ -136,13 +113,17 @@ void handleCrashSensors() {
 
 /* Serial event handler */
 void serialEvent() {
-  String datosrecibidos = Serial.readString();
-  elemento1 = s.separa(datosrecibidos, ':', 0);
-  String elemento2 = s.separa(datosrecibidos, ':', 1);
-  motion = elemento2.toFloat();
-
-  Serial.println("el elemento 1 es: " + elemento1);
-  Serial.println("el elemento 2 es: " + elemento2);
+  while (Serial.available()) {
+    char received = Serial.read();
+    if (received == '\n') { // end of command
+      elemento1 = s.separa(receivedData, ':', 0);
+      String elemento2 = s.separa(receivedData, ':', 1);
+      motion_mm = elemento2.toFloat();
+      receivedData = ""; // clear buffer
+    } else {
+      receivedData += received; // add to buffer
+    }
+  }
 }
 
 /* Crash sensor 1 interrupt handler */
@@ -177,7 +158,8 @@ void stopMotorAndMove(int steps, bool resetPosition) {
 
   if (resetPosition) {
     stepper.setCurrentPosition(0); // Establecer la posición de inicio en 0
-    counter = 0; // Reset encoder counter
+    Serial.println("HomeComplete");
+    
   }
 
   stepper.stop(); // Stop the motor completely
@@ -187,37 +169,37 @@ void stopMotorAndMove(int steps, bool resetPosition) {
 void executeCommand(String cmd) {
   cmd.trim(); // Eliminar espacios en blanco al inicio y al final
 
-  if (cmd.startsWith("Motor")) {
+  if (cmd.startsWith("MoveAbs")) {
+    // Convert mm to steps
+    int motion_steps = 398.77 * motion_mm + 180.15;
     // Moverse a una posición especificada usando un método no bloqueante
     homing = false; // Ensure we are not in homing mode
-    stepper.moveTo(motion);
+    moveComplete = false;
+    stepper.moveTo(motion_steps);
+  } else if (cmd.startsWith("MoveRelative")) {
+    // Convert mm to steps for relative movement
+    int motion_steps = 398.77 * motion_mm;
+    // Move a specified distance from the current position
+    homing = false; // Ensure we are not in homing mode
+    moveComplete = false;
+    stepper.move(motion_steps);
   } else if (cmd.startsWith("Home")) {
     // Mover el motor a una velocidad constante hacia el crash sensor 1
     homing = true; // Enter homing mode
-    stepper.setSpeed(-6000);
+    stepper.setSpeed(-2000);
+  } else if (cmd.startsWith("Stop")) {
+    // Stop the motor immediately
+    homing = false; // Ensure we are not in homing mode
+    stepper.stop();
+    stepper.setCurrentPosition(stepper.currentPosition()); // Retain current position
+    moveComplete = true; // Indicate the move is complete
+    Serial.println("MoveComplete");
   }
 }
 
-/* Timer interrupt handler */
-void IRAM_ATTR onTimer() {
-  handleEncoderState();
-}
-
-/* Encoder state handler */
-void handleEncoderState() {
-  int stateA = digitalRead(encoderPinA);
-  int stateB = digitalRead(encoderPinB);
-
-  int currentState = (stateA << 1) | stateB;
-
-  if (currentState != lastEncoderState) {
-    if ((currentState == 1 && lastEncoderState == 0) || (currentState == 2 && lastEncoderState == 3) ||
-        (currentState == 3 && lastEncoderState == 1) || (currentState == 0 && lastEncoderState == 2)) {
-      counter--;
-    } else {
-      counter = max(0, counter + 1);
-    }
+void checkMovementComplete() {
+  if (!moveComplete && stepper.distanceToGo() == 0) {
+    moveComplete = true;
+    Serial.println("MoveComplete");
   }
-
-  lastEncoderState = currentState;
 }
