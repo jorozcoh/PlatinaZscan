@@ -17,6 +17,7 @@ unsigned long lastDebounceTime2 = 0;
 const unsigned long debounceDelay = 50; // tiempo de debounce en milisegundos
 bool homing = false; // bandera para indicar si el motor está en modo Home
 bool moveComplete = false; // bandera para indicar si el movimiento ha sido completado
+bool homeComplete = false; // bandera para indicar si el homing ha sido completado
 
 // Serial communication variables
 Separador s; // estructura para separar del serial
@@ -47,10 +48,10 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(stopSensor2), buttonInterrupt2, CHANGE);
 
   // Serial initialization
-  Serial.begin(115200);
+  Serial.begin(500000);
 
   // Motor initial setup
-  stepper.setMaxSpeed(8000);
+  stepper.setMaxSpeed(4000);
   stepper.setAcceleration(70); // ideal 50
 }
 
@@ -74,7 +75,7 @@ void loop() {
   // Print motor position while moving
   static long lastPosition = -1;
   long currentPosition = stepper.currentPosition();
-  if (currentPosition != lastPosition) {
+  if (!homeComplete && currentPosition != lastPosition) {
     float position_mm = (currentPosition - 180.15) / 398.77; // Convert steps to mm
     Serial.print("Position: ");
     Serial.println(position_mm);
@@ -158,8 +159,8 @@ void stopMotorAndMove(int steps, bool resetPosition) {
 
   if (resetPosition) {
     stepper.setCurrentPosition(0); // Establecer la posición de inicio en 0
-    Serial.println("HomeComplete");
-    
+    homeComplete = true;
+    Serial.println("Ready");
   }
 
   stepper.stop(); // Stop the motor completely
@@ -174,6 +175,7 @@ void executeCommand(String cmd) {
     int motion_steps = 398.77 * motion_mm + 180.15;
     // Moverse a una posición especificada usando un método no bloqueante
     homing = false; // Ensure we are not in homing mode
+    homeComplete = false;
     moveComplete = false;
     stepper.moveTo(motion_steps);
   } else if (cmd.startsWith("MoveRelative")) {
@@ -181,17 +183,20 @@ void executeCommand(String cmd) {
     int motion_steps = 398.77 * motion_mm;
     // Move a specified distance from the current position
     homing = false; // Ensure we are not in homing mode
+    homeComplete = false;
     moveComplete = false;
     stepper.move(motion_steps);
   } else if (cmd.startsWith("Home")) {
     // Mover el motor a una velocidad constante hacia el crash sensor 1
     homing = true; // Enter homing mode
-    stepper.setSpeed(-2000);
+    homeComplete = false;
+    stepper.setSpeed(-8000);
   } else if (cmd.startsWith("Stop")) {
     // Stop the motor immediately
     homing = false; // Ensure we are not in homing mode
     stepper.stop();
     stepper.setCurrentPosition(stepper.currentPosition()); // Retain current position
+    homeComplete = false;
     moveComplete = true; // Indicate the move is complete
     Serial.println("MoveComplete");
   }

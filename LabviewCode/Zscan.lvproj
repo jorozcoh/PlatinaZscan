@@ -160,6 +160,7 @@
 		<Item Name="closeBothPDs.vi" Type="VI" URL="../closeBothPDs.vi"/>
 		<Item Name="ClosePhotoDetector.vi" Type="VI" URL="../ClosePhotoDetector.vi"/>
 		<Item Name="DATABothPDs.vi" Type="VI" URL="../DATABothPDs.vi"/>
+		<Item Name="ForExample.vi" Type="VI" URL="../ForExample.vi"/>
 		<Item Name="initBothPDs.vi" Type="VI" URL="../initBothPDs.vi"/>
 		<Item Name="InitializePhotoDetector.vi" Type="VI" URL="../InitializePhotoDetector.vi"/>
 		<Item Name="MainStateControls.ctl" Type="VI" URL="../MainStateControls.ctl"/>
@@ -172,6 +173,7 @@
 		<Item Name="Dependencies" Type="Dependencies">
 			<Item Name="vi.lib" Type="Folder">
 				<Item Name="NI_AALBase.lvlib" Type="Library" URL="/&lt;vilib&gt;/Analysis/NI_AALBase.lvlib"/>
+				<Item Name="subTimeDelay.vi" Type="VI" URL="/&lt;vilib&gt;/express/express execution control/TimeDelayBlock.llb/subTimeDelay.vi"/>
 				<Item Name="VISA Configure Serial Port" Type="VI" URL="/&lt;vilib&gt;/Instr/_visa.llb/VISA Configure Serial Port"/>
 				<Item Name="VISA Configure Serial Port (Instr).vi" Type="VI" URL="/&lt;vilib&gt;/Instr/_visa.llb/VISA Configure Serial Port (Instr).vi"/>
 				<Item Name="VISA Configure Serial Port (Serial Instr).vi" Type="VI" URL="/&lt;vilib&gt;/Instr/_visa.llb/VISA Configure Serial Port (Serial Instr).vi"/>
